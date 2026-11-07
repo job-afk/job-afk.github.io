@@ -1,0 +1,628 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>Тетріс відключень</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap">
+<style>
+/* Layout: one sheet like the outage table. Header with date and timestamp, a 10x20 grid (hour columns x group rows) with rotated hour labels and a diagonal corner cell, a side panel with stats, controls and legend. Falling piece = yellow bolt in a ringed cell, locked = black crossed bolt on gray, line clear = half-hour cell. */
+:root{
+  --bg:#f4f7fa;
+  --surface:#ffffff;
+  --fg:#1c2128;
+  --muted:#6c7886;
+  --line:#e1e6ec;
+  --off:#e5e7ea;
+  --bolt:#15181c;
+  --yellow:#f0ae17;
+  --on-yellow:#1c2128;
+  --head:#f1f4f8;
+  --veil:rgba(255,255,255,.88);
+  --shadow:rgba(20,30,50,.07);
+  --font:Roboto,"Helvetica Neue",Arial,sans-serif;
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --bg:#0e1217; --surface:#161b21; --fg:#e9edf1; --muted:#8d99a6; --line:#27303a; --off:#2a3038; --bolt:#e9edf1; --yellow:#f6bb35; --head:#1b2129; --veil:rgba(22,27,33,.88); --shadow:rgba(0,0,0,.35);
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0e1217; --surface:#161b21; --fg:#e9edf1; --muted:#8d99a6; --line:#27303a; --off:#2a3038; --bolt:#e9edf1; --yellow:#f6bb35; --head:#1b2129; --veil:rgba(22,27,33,.88); --shadow:rgba(0,0,0,.35);
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+body{
+  margin:0;
+  background:var(--bg);
+  color:var(--fg);
+  font-family:var(--font);
+  font-size:14px;
+  padding-block:18px 28px;
+  padding-left:max(16px,env(safe-area-inset-left,0px));
+  padding-right:max(16px,env(safe-area-inset-right,0px));
+  -webkit-user-select:none;
+  user-select:none;
+  -webkit-tap-highlight-color:transparent;
+}
+.sheet{max-width:960px;margin-inline:auto}
+h1{
+  margin:0 0 6px;
+  font-size:clamp(18px,4.6vw,28px);
+  line-height:1.2;
+  font-weight:700;
+  text-wrap:balance;
+}
+.stamp{margin:0 0 16px;color:var(--muted);font-size:12.5px;line-height:1.4}
+
+main{
+  --label:44px;
+  --hh:58px;
+  --cell:28px;
+  --bw:calc(var(--label) + var(--cell) * 10 + 2px);
+  display:grid;
+  grid-template-columns:minmax(0,1fr);
+  grid-template-areas:"hud" "board" "controls" "legend";
+  justify-items:center;
+  gap:14px;
+}
+@supports (height:100dvh){
+  main{--cell:clamp(16px,min(calc((100vw - 34px - var(--label)) / 10),calc((100dvh - 410px) / 12)),36px)}
+}
+@media (min-width:520px){main{--label:78px}}
+@media (min-width:760px){
+  main{
+    --hh:62px;
+    grid-template-columns:auto minmax(230px,1fr);
+    grid-template-areas:"board hud" "board controls" "board legend";
+    grid-template-rows:auto auto 1fr;
+    justify-items:stretch;
+    align-items:start;
+    column-gap:24px;
+  }
+}
+@supports (height:100dvh){
+  @media (min-width:760px){
+    main{--cell:clamp(18px,calc((100dvh - 190px - var(--hh)) / 12),36px)}
+  }
+}
+
+.board-col{grid-area:board;position:relative;justify-self:center}
+.board{
+  display:grid;
+  grid-template-columns:var(--label) repeat(10,var(--cell));
+  grid-template-rows:var(--hh) repeat(12,var(--cell));
+  border:1px solid var(--line);
+  border-radius:14px;
+  overflow:hidden;
+  background:var(--surface);
+  box-shadow:0 1px 3px var(--shadow);
+  touch-action:none;
+}
+.corner{
+  position:relative;
+  background:
+    linear-gradient(to top right,transparent calc(50% - .5px),var(--line) calc(50% - .5px),var(--line) calc(50% + .5px),transparent calc(50% + .5px)),
+    var(--head);
+  box-shadow:inset -1px -1px 0 var(--line);
+  font-weight:700;
+  font-size:12px;
+}
+.corner .ct{position:absolute;top:8px;right:8px}
+.corner .cg{position:absolute;bottom:7px;left:8px}
+.hour{
+  display:flex;align-items:center;justify-content:center;
+  background:var(--head);
+  box-shadow:inset -1px -1px 0 var(--line);
+}
+.hour span{
+  writing-mode:vertical-rl;
+  transform:rotate(180deg);
+  font-weight:700;
+  font-size:clamp(10px,calc(var(--cell) * .42),13px);
+  letter-spacing:.02em;
+  font-variant-numeric:tabular-nums;
+}
+.glabel{
+  display:flex;align-items:center;
+  padding-left:8px;
+  background:linear-gradient(90deg,var(--head),var(--surface));
+  box-shadow:inset 0 -1px 0 var(--line);
+  font-weight:700;
+  font-size:clamp(10px,calc(var(--cell) * .4),14px);
+  white-space:nowrap;
+}
+@media (min-width:520px){.glabel{padding-left:12px}}
+@media (max-width:519px){.glabel .pre{display:none}}
+
+.cell{
+  position:relative;
+  --gap:var(--off);
+  box-shadow:inset -1px -1px 0 var(--line);
+}
+.ico{display:none;position:absolute;left:12%;top:12%;width:76%;height:76%;color:var(--bolt)}
+.cell.off{background:var(--off)}
+.cell.off .ico{display:block}
+.cell.act{background:var(--off);box-shadow:inset 0 0 0 2px var(--yellow),inset -1px -1px 0 var(--line)}
+.cell.act .ico{display:block;color:var(--yellow)}
+.cell.ghost{--gap:var(--surface)}
+.cell.ghost .ico{display:block;color:var(--yellow);opacity:.45}
+.cell.half{background:linear-gradient(90deg,var(--off) 50%,transparent 50%)}
+.cell.half .ico{display:block;color:var(--yellow)}
+
+.ov{
+  position:absolute;
+  left:calc(var(--label) + 1px);
+  top:calc(var(--hh) + 1px);
+  right:1px;bottom:1px;
+  display:flex;align-items:center;justify-content:center;
+  padding:12px;
+  background:var(--veil);
+  border-bottom-right-radius:13px;
+}
+.ovcard{text-align:center;max-width:260px}
+.ovcard h2{margin:0 0 6px;font-size:20px;line-height:1.2;font-weight:700;text-wrap:balance}
+.ovcard p{margin:0 0 14px;color:var(--muted);font-size:13.5px;line-height:1.45}
+.primary{
+  height:44px;padding:0 28px;border:0;border-radius:12px;
+  background:var(--yellow);color:var(--on-yellow);
+  font:700 15px var(--font);cursor:pointer;
+}
+.primary:active{transform:scale(.97)}
+
+.hud{grid-area:hud;display:flex;gap:10px;align-items:stretch;width:var(--bw)}
+.stats{flex:1;min-width:0;display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.stat,.nextbox{
+  background:var(--surface);
+  border:1px solid var(--line);
+  border-radius:10px;
+  padding:7px 10px;
+}
+.stat{display:flex;flex-direction:column;gap:1px;min-width:0}
+.k{font-size:11px;color:var(--muted);letter-spacing:.05em;text-transform:uppercase}
+.v{font-size:20px;font-weight:700;font-variant-numeric:tabular-nums;line-height:1.2;overflow:hidden;text-overflow:ellipsis}
+.nextbox{display:flex;flex-direction:column;align-items:center;padding:7px 12px}
+.mini{--mc:15px;display:grid;grid-template-columns:repeat(4,var(--mc));grid-auto-rows:var(--mc);margin-top:8px}
+.mini.shift{transform:translateX(calc(var(--mc) / 2))}
+.mini .cell{box-shadow:none}
+
+.controls{grid-area:controls;display:grid;grid-template-columns:repeat(6,1fr);gap:8px;width:var(--bw)}
+.btn{
+  height:52px;min-width:0;padding:0;
+  display:grid;place-items:center;
+  background:var(--surface);color:var(--fg);
+  border:1px solid var(--line);border-radius:12px;
+  cursor:pointer;touch-action:manipulation;
+  transition:transform .08s,background .08s;
+}
+.btn:active{transform:scale(.95);background:var(--head)}
+.btn svg{width:24px;height:24px;fill:none;stroke:currentColor;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
+.hint{display:none;grid-column:1/-1;margin:2px 0 0;font-size:12px;line-height:1.5;color:var(--muted)}
+@media (hover:hover) and (pointer:fine){.hint{display:block}}
+button:focus-visible{outline:2px solid var(--fg);outline-offset:2px}
+
+.legend{grid-area:legend;display:flex;flex-wrap:wrap;gap:10px 18px;align-items:center;width:var(--bw)}
+.lg{display:flex;align-items:center;gap:8px;font-size:13px}
+.sw{position:relative;width:30px;height:30px;border:1px solid var(--line);border-radius:5px;overflow:hidden;background:var(--surface);flex:none}
+.sw .cell{position:absolute;inset:0;box-shadow:none}
+.sw .cell.act{box-shadow:inset 0 0 0 2px var(--yellow)}
+
+@media (min-width:760px){
+  .hud,.controls,.legend{width:auto}
+  .legend{align-self:start}
+}
+@media (prefers-reduced-motion:reduce){.btn,.primary{transition:none}}
+</style>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <defs>
+    <symbol id="boltoff" viewBox="0 0 24 24">
+      <path d="M13.5 1.5 4.5 13.2h6L9 22.5l10.5-13h-6.2z" fill="currentColor"/>
+      <path d="M3.5 3.5 20.5 20.5" fill="none" stroke-linecap="round" style="stroke:var(--gap);stroke-width:4.6"/>
+      <path d="M3.5 3.5 20.5 20.5" fill="none" stroke-linecap="round" style="stroke:currentColor;stroke-width:1.9"/>
+    </symbol>
+  </defs>
+</svg>
+
+<div class="sheet">
+  <h1 id="ttl">Тетріс відключень (Київська обл.)</h1>
+  <p class="stamp" id="stamp"></p>
+
+  <main>
+    <section class="board-col" id="boardCol" aria-label="Ігрове поле">
+      <div class="board" id="board"></div>
+      <div class="ov" id="ov">
+        <div class="ovcard">
+          <h2 id="ovTitle"></h2>
+          <p id="ovText"></p>
+          <button class="primary" id="ovBtn" type="button"></button>
+        </div>
+      </div>
+    </section>
+
+    <section class="hud" aria-label="Показники">
+      <div class="stats">
+        <div class="stat"><span class="k">Рахунок</span><span class="v" id="score">0</span></div>
+        <div class="stat"><span class="k">Рекорд</span><span class="v" id="best">0</span></div>
+        <div class="stat"><span class="k">Рівень</span><span class="v" id="level">1</span></div>
+        <div class="stat"><span class="k">Рядки</span><span class="v" id="lines">0</span></div>
+      </div>
+      <div class="nextbox"><span class="k">Далі</span><div class="mini" id="next"></div></div>
+    </section>
+
+    <section class="controls" aria-label="Керування">
+      <button class="btn" id="bL" type="button" aria-label="Ліворуч"><svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg></button>
+      <button class="btn" id="bR" type="button" aria-label="Праворуч"><svg viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></svg></button>
+      <button class="btn" id="bRot" type="button" aria-label="Повернути"><svg viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.6-5.9"/><path d="M20 4v5h-5"/></svg></button>
+      <button class="btn" id="bDown" type="button" aria-label="Вниз"><svg viewBox="0 0 24 24"><path d="M5 9l7 7 7-7"/></svg></button>
+      <button class="btn" id="bDrop" type="button" aria-label="Скинути"><svg viewBox="0 0 24 24"><path d="M6 4l6 6 6-6"/><path d="M6 12l6 6 6-6"/></svg></button>
+      <button class="btn" id="bPause" type="button" aria-label="Пауза"><svg viewBox="0 0 24 24"><path d="M8 5v14"/><path d="M16 5v14"/></svg></button>
+      <p class="hint">← → рух · ↑ або X поворот · ↓ повільно вниз · пробіл скинути · P пауза · Enter старт</p>
+    </section>
+
+    <section class="legend" aria-label="Умовні позначення">
+      <div class="lg"><span class="sw"></span><span>Світло є</span></div>
+      <div class="lg"><span class="sw"><span class="cell off"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#boltoff"/></svg></span></span><span>Світла нема</span></div>
+      <div class="lg"><span class="sw"><span class="cell act"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#boltoff"/></svg></span></span><span>Фігура падає</span></div>
+      <div class="lg"><span class="sw"><span class="cell ghost"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#boltoff"/></svg></span></span><span>Тінь фігури</span></div>
+      <div class="lg"><span class="sw"><span class="cell half"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#boltoff"/></svg></span></span><span>Світло дали</span></div>
+    </section>
+  </main>
+</div>
+
+<script>
+(function(){
+'use strict';
+var COLS=10, ROWS=12, KEY='blackout-tetris-best';
+var TYPES=['I','O','T','S','Z','J','L'];
+var SH={
+  I:[[0,0,0,0],[1,1,1,1],[0,0,0,0],[0,0,0,0]],
+  O:[[1,1],[1,1]],
+  T:[[0,1,0],[1,1,1],[0,0,0]],
+  S:[[0,1,1],[1,1,0],[0,0,0]],
+  Z:[[1,1,0],[0,1,1],[0,0,0]],
+  J:[[1,0,0],[1,1,1],[0,0,0]],
+  L:[[0,0,1],[1,1,1],[0,0,0]]
+};
+var DEMO=['1110010000','1111011100','1111111101'];
+
+var tg=window.Telegram&&window.Telegram.WebApp;
+if(tg){
+  try{
+    tg.ready(); tg.expand();
+    if(tg.disableVerticalSwipes) tg.disableVerticalSwipes();
+    if(tg.colorScheme) document.documentElement.setAttribute('data-theme',tg.colorScheme);
+  }catch(e){}
+}
+function buzz(kind){
+  try{
+    if(!tg||!tg.HapticFeedback) return;
+    if(kind==='error') tg.HapticFeedback.notificationOccurred('error');
+    else tg.HapticFeedback.impactOccurred(kind||'light');
+  }catch(e){}
+}
+
+function $(id){return document.getElementById(id)}
+function pad(n){return n<10?'0'+n:''+n}
+var boardEl=$('board'), boardCol=$('boardCol'), ov=$('ov'), ovTitle=$('ovTitle'), ovText=$('ovText'), ovBtn=$('ovBtn');
+var nextEl=$('next'), scoreEl=$('score'), bestEl=$('best'), levelEl=$('level'), linesEl=$('lines'), stampEl=$('stamp');
+
+var now0=new Date();
+$('ttl').textContent='Тетріс відключень на '+now0.toLocaleDateString('uk-UA',{day:'numeric',month:'long'})+' (Київська обл.)';
+
+function mkCell(){
+  var d=document.createElement('div');
+  d.className='cell';
+  d.innerHTML='<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#boltoff"/></svg>';
+  return d;
+}
+
+var cells=[], cls=[];
+(function build(){
+  var f=document.createDocumentFragment(), r, c, d;
+  d=document.createElement('div'); d.className='corner';
+  d.innerHTML='<span class="ct">Час</span><span class="cg">Група</span>';
+  f.appendChild(d);
+  for(c=0;c<COLS;c++){
+    d=document.createElement('div'); d.className='hour';
+    d.innerHTML='<span>'+pad(c)+'-'+pad(c+1)+'</span>';
+    f.appendChild(d);
+  }
+  for(r=0;r<ROWS;r++){
+    d=document.createElement('div'); d.className='glabel';
+    d.innerHTML='<span><span class="pre">Група </span>'+(Math.floor(r/2)+1)+'.'+(r%2+1)+'</span>';
+    f.appendChild(d);
+    cells[r]=[]; cls[r]=[];
+    for(c=0;c<COLS;c++){
+      d=mkCell(); f.appendChild(d);
+      cells[r][c]=d; cls[r][c]='';
+    }
+  }
+  boardEl.appendChild(f);
+  for(var i=0;i<16;i++) nextEl.appendChild(mkCell());
+})();
+
+var board, piece=null, nextT='T', bag=[], score=0, lines=0, level=1, best=0;
+var state='idle', clearRows=[], softHeld=false, gid=0, acc=0, last=0;
+try{best=parseInt(localStorage.getItem(KEY),10)||0}catch(e){}
+
+function emptyBoard(){var b=[];for(var r=0;r<ROWS;r++){b[r]=[];for(var c=0;c<COLS;c++)b[r][c]=0;}return b}
+function demoBoard(){
+  var b=emptyBoard();
+  for(var i=0;i<DEMO.length;i++){
+    for(var c=0;c<COLS;c++) b[ROWS-DEMO.length+i][c]=DEMO[i].charAt(c)==='1'?1:0;
+  }
+  return b;
+}
+board=demoBoard();
+
+function nextType(){
+  if(!bag.length){
+    bag=TYPES.slice();
+    for(var i=bag.length-1;i>0;i--){var j=Math.floor(Math.random()*(i+1));var t=bag[i];bag[i]=bag[j];bag[j]=t;}
+  }
+  return bag.pop();
+}
+function hit(m,x,y){
+  for(var r=0;r<m.length;r++)for(var c=0;c<m[r].length;c++){
+    if(!m[r][c]) continue;
+    var nx=x+c, ny=y+r;
+    if(nx<0||nx>=COLS||ny>=ROWS) return true;
+    if(ny>=0&&board[ny][nx]) return true;
+  }
+  return false;
+}
+function rotCW(m){var n=m.length,o=[],r,c;for(r=0;r<n;r++){o[r]=[];for(c=0;c<n;c++)o[r][c]=m[n-1-c][r];}return o}
+function rotCCW(m){var n=m.length,o=[],r,c;for(r=0;r<n;r++){o[r]=[];for(c=0;c<n;c++)o[r][c]=m[c][n-1-r];}return o}
+
+function drawNext(){
+  var m=SH[nextT], n=m.length, ro=nextT==='I'?0:1, co=n===2?1:0, all=nextEl.children, i, r, c;
+  for(i=0;i<all.length;i++) all[i].className='cell';
+  for(r=0;r<n;r++)for(c=0;c<n;c++) if(m[r][c]) all[(r+ro)*4+(c+co)].className='cell off';
+  if(n===3) nextEl.classList.add('shift'); else nextEl.classList.remove('shift');
+}
+
+function fmtStamp(d){
+  return pad(d.getDate())+'.'+pad(d.getMonth()+1)+'.'+d.getFullYear()+' '+pad(d.getHours())+':'+pad(d.getMinutes());
+}
+function hud(){
+  scoreEl.textContent=score;
+  bestEl.textContent=Math.max(best,score);
+  levelEl.textContent=level;
+  linesEl.textContent=lines;
+  stampEl.textContent='Оновлення рахунку: '+fmtStamp(new Date())+' · Дані отримано: '+pad(new Date().getHours())+':'+pad(new Date().getMinutes());
+}
+function saveBest(){
+  if(score>best){best=score;try{localStorage.setItem(KEY,String(best))}catch(e){}}
+}
+
+function overlay(){
+  if(state==='play'||state==='clear'){ov.hidden=true;return}
+  ov.hidden=false;
+  if(state==='idle'){
+    ovTitle.textContent='Тетріс відключень';
+    ovText.textContent='Складіть повний рядок, і світло з’явиться. Не дайте стопці дійти до верху.';
+    ovBtn.textContent='Старт';
+  }else if(state==='pause'){
+    ovTitle.textContent='Пауза';
+    ovText.textContent='Графік зупинено.';
+    ovBtn.textContent='Продовжити';
+  }else{
+    ovTitle.textContent='Світла нема';
+    ovText.textContent='Гру закінчено. Рахунок: '+score+', рядків: '+lines+'.';
+    ovBtn.textContent='Ще раз';
+  }
+}
+
+function render(){
+  var v=[],r,c,k;
+  for(r=0;r<ROWS;r++){v[r]=[];for(c=0;c<COLS;c++)v[r][c]=board[r][c]?'off':'';}
+  if(piece&&(state==='play'||state==='pause')){
+    var gy=piece.y;
+    while(!hit(piece.m,piece.x,gy+1)) gy++;
+    paint(v,gy,'ghost',true);
+    paint(v,piece.y,'act',false);
+  }
+  for(k=0;k<clearRows.length;k++) for(c=0;c<COLS;c++) v[clearRows[k]][c]='half';
+  for(r=0;r<ROWS;r++)for(c=0;c<COLS;c++){
+    if(cls[r][c]!==v[r][c]){cls[r][c]=v[r][c];cells[r][c].className=v[r][c]?'cell '+v[r][c]:'cell';}
+  }
+}
+function paint(v,y,name,onlyEmpty){
+  var m=piece.m;
+  for(var r=0;r<m.length;r++)for(var c=0;c<m[r].length;c++){
+    if(!m[r][c]) continue;
+    var nx=piece.x+c, ny=y+r;
+    if(ny<0||ny>=ROWS||nx<0||nx>=COLS) continue;
+    if(onlyEmpty&&v[ny][nx]) continue;
+    v[ny][nx]=name;
+  }
+}
+
+function spawn(){
+  var t=nextT; nextT=nextType();
+  var m=SH[t].map(function(row){return row.slice()});
+  piece={t:t,m:m,x:Math.floor((COLS-m.length)/2),y:t==='I'?-1:0};
+  drawNext();
+  if(hit(piece.m,piece.x,piece.y)) gameOver();
+}
+function gameOver(){
+  state='over'; piece=null; softHeld=false;
+  saveBest(); buzz('error'); hud(); overlay(); render();
+}
+function newGame(){
+  gid++; board=emptyBoard(); score=0; lines=0; level=1; bag=[]; softHeld=false; clearRows=[]; acc=0; last=0;
+  nextT=nextType(); state='play';
+  spawn(); hud(); overlay(); render();
+}
+
+function lock(){
+  var m=piece.m, r, c;
+  for(r=0;r<m.length;r++)for(c=0;c<m[r].length;c++){
+    if(!m[r][c]) continue;
+    var ny=piece.y+r, nx=piece.x+c;
+    if(ny<0){gameOver();return}
+    board[ny][nx]=1;
+  }
+  var full=[];
+  for(r=0;r<ROWS;r++){
+    var ok=true;
+    for(c=0;c<COLS;c++) if(!board[r][c]){ok=false;break}
+    if(ok) full.push(r);
+  }
+  piece=null; acc=0;
+  if(full.length){
+    state='clear'; clearRows=full; softHeld=false;
+    buzz('medium'); render();
+    var id=gid;
+    setTimeout(function(){ if(id===gid&&state==='clear') finishClear(full); },300);
+  }else{
+    buzz('light'); spawn(); render();
+  }
+}
+function finishClear(full){
+  var nb=[],r,c;
+  for(r=0;r<ROWS;r++) if(full.indexOf(r)<0) nb.push(board[r]);
+  while(nb.length<ROWS){var row=[];for(c=0;c<COLS;c++)row.push(0);nb.unshift(row);}
+  board=nb;
+  var n=full.length;
+  score+=[0,100,300,500,800][n]*level;
+  lines+=n; level=1+Math.floor(lines/10);
+  clearRows=[]; state='play'; last=0;
+  spawn(); hud(); render();
+}
+
+function interval(){return Math.max(90,820-(level-1)*72)}
+function fall(manual){
+  if(!hit(piece.m,piece.x,piece.y+1)){
+    piece.y++;
+    if(manual){score+=1;hud()}
+    render();
+    return true;
+  }
+  lock(); return false;
+}
+function softStep(){if(state!=='play'||!piece)return;acc=0;fall(true)}
+function hardDrop(){
+  if(state!=='play'||!piece)return;
+  var d=0;
+  while(!hit(piece.m,piece.x,piece.y+1)){piece.y++;d++}
+  score+=d*2; buzz('heavy'); lock(); hud();
+}
+function move(dx){
+  if(state!=='play'||!piece)return;
+  if(!hit(piece.m,piece.x+dx,piece.y)){piece.x+=dx;render()}
+}
+function rotate(dir){
+  if(state!=='play'||!piece)return;
+  var m=dir>0?rotCW(piece.m):rotCCW(piece.m), kicks=[0,-1,1,-2,2];
+  for(var i=0;i<kicks.length;i++){
+    if(!hit(m,piece.x+kicks[i],piece.y)){piece.m=m;piece.x+=kicks[i];buzz('light');render();return}
+  }
+}
+function togglePause(){
+  if(state==='play'){state='pause';softHeld=false}
+  else if(state==='pause'){state='play';last=0}
+  else return;
+  overlay(); render();
+}
+
+function frame(t){
+  requestAnimationFrame(frame);
+  if(!last) last=t;
+  var dt=t-last; last=t;
+  if(dt>200) dt=200;
+  if(state!=='play'||!piece) return;
+  acc+=dt;
+  var iv=softHeld?Math.min(55,interval()):interval();
+  while(acc>=iv&&state==='play'&&piece){
+    acc-=iv;
+    if(!fall(softHeld)){acc=0;break}
+  }
+}
+
+ovBtn.addEventListener('click',function(){
+  if(state==='pause') togglePause(); else newGame();
+});
+
+document.addEventListener('keydown',function(e){
+  var k=e.code;
+  var onBtn=e.target&&e.target.closest&&e.target.closest('button');
+  if(k==='Enter'&&!onBtn&&(state==='idle'||state==='over')){newGame();e.preventDefault();return}
+  if(k==='KeyP'||k==='Escape'){togglePause();return}
+  if(state!=='play') return;
+  switch(k){
+    case 'ArrowLeft': move(-1); break;
+    case 'ArrowRight': move(1); break;
+    case 'ArrowUp': case 'KeyX': rotate(1); break;
+    case 'KeyZ': rotate(-1); break;
+    case 'ArrowDown': if(!e.repeat){softHeld=true;softStep()} break;
+    case 'Space': if(onBtn) return; hardDrop(); break;
+    default: return;
+  }
+  e.preventDefault();
+});
+document.addEventListener('keyup',function(e){if(e.code==='ArrowDown')softHeld=false});
+document.addEventListener('visibilitychange',function(){if(document.hidden&&state==='play')togglePause()});
+
+function bindHold(btn,fn){
+  var t1=0,t2=0;
+  function stop(){clearTimeout(t1);clearInterval(t2)}
+  btn.addEventListener('pointerdown',function(e){
+    e.preventDefault(); fn();
+    t1=setTimeout(function(){t2=setInterval(fn,70)},190);
+  });
+  ['pointerup','pointerleave','pointercancel'].forEach(function(ev){btn.addEventListener(ev,stop)});
+  btn.addEventListener('click',function(e){if(e.detail===0)fn()});
+}
+function bindTap(btn,fn){
+  btn.addEventListener('pointerdown',function(e){e.preventDefault();fn()});
+  btn.addEventListener('click',function(e){if(e.detail===0)fn()});
+}
+bindHold($('bL'),function(){move(-1)});
+bindHold($('bR'),function(){move(1)});
+bindTap($('bRot'),function(){rotate(1)});
+bindTap($('bDrop'),hardDrop);
+bindTap($('bPause'),togglePause);
+(function(){
+  var b=$('bDown');
+  function off(){softHeld=false}
+  b.addEventListener('pointerdown',function(e){e.preventDefault();if(state==='play'){softHeld=true;softStep()}});
+  ['pointerup','pointerleave','pointercancel'].forEach(function(ev){b.addEventListener(ev,off)});
+  b.addEventListener('click',function(e){if(e.detail===0)softStep()});
+})();
+
+(function(){
+  var g=null;
+  function cw(){return cells[0][0].getBoundingClientRect().width||24}
+  boardCol.addEventListener('pointerdown',function(e){
+    if(state!=='play'||e.target.closest('button'))return;
+    g={x:e.clientX,y:e.clientY,mx:e.clientX,t:performance.now(),moved:false};
+    try{boardCol.setPointerCapture(e.pointerId)}catch(err){}
+  });
+  boardCol.addEventListener('pointermove',function(e){
+    if(!g||state!=='play')return;
+    var w=cw(), dx=e.clientX-g.mx;
+    while(Math.abs(dx)>=w){
+      var s=dx>0?1:-1; move(s); g.mx+=s*w; dx=e.clientX-g.mx; g.moved=true;
+    }
+  });
+  boardCol.addEventListener('pointerup',function(e){
+    if(!g)return;
+    var dx=e.clientX-g.x, dy=e.clientY-g.y, dt=performance.now()-g.t, w=cw();
+    if(!g.moved&&state==='play'){
+      if(dy>w*3&&Math.abs(dy)>Math.abs(dx)*1.5&&dt<450) hardDrop();
+      else if(Math.abs(dx)<10&&Math.abs(dy)<10) rotate(1);
+    }
+    g=null;
+  });
+  boardCol.addEventListener('pointercancel',function(){g=null});
+})();
+
+drawNext(); hud(); overlay(); render();
+requestAnimationFrame(frame);
+})();
+</script>
+
+</body></html>
